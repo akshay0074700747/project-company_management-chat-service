@@ -12,5 +12,6 @@ func Inject(cfg *config.Config) *handlers.ChatHandlers {
 	db := db.ConnectMongo(cfg)
 	repo := repository.NewChatRepo(db)
 	usecase := usecase.NewChatUsecase(repo)
-	return handlers.NewChatHandlers(usecase, ":50003", ":50002",":50001")
+	insertRoom := usecase.InsertIntoDB()
+	return handlers.NewChatHandlers(usecase, ":50003", ":50002",":50001",insertRoom)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/akshay0074700747/project-and-company-management-chat-service/entities"
 	"github.com/akshay0074700747/project-and-company-management-chat-service/helpers"
 )
 
@@ -12,7 +13,7 @@ type Pool struct {
 	ID           string
 	RegisterChan chan *Client
 	UnRegister   chan *Client
-	Broadcast    chan Message
+	Broadcast    chan entities.Message
 	Clients      map[string]*Client
 }
 
@@ -21,7 +22,7 @@ func NewPool(id string) *Pool {
 		ID:           id,
 		RegisterChan: make(chan *Client),
 		UnRegister:   make(chan *Client),
-		Broadcast:    make(chan Message),
+		Broadcast:    make(chan entities.Message),
 		Clients:      make(map[string]*Client),
 	}
 }
@@ -31,7 +32,7 @@ type RegisterNUnregister struct {
 	Time    time.Time `json:"Time"`
 }
 
-func (pool *Pool) Serve() {
+func (pool *Pool) Serve(insertChan chan<- entities.InsertIntoRoomMessage) {
 	defer func() {
 		close(pool.RegisterChan)
 		close(pool.UnRegister)
@@ -75,6 +76,11 @@ func (pool *Pool) Serve() {
 					continue
 				}
 			}
+			masg := entities.InsertIntoRoomMessage{
+				RoomID:   pool.ID,
+				Messages: message,
+			}
+			insertChan <- masg
 		}
 	}
 }

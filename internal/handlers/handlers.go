@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/akshay0074700747/project-and-company-management-chat-service/entities"
 	"github.com/akshay0074700747/project-and-company-management-chat-service/helpers"
 	"github.com/akshay0074700747/project-and-company-management-chat-service/internal/usecase"
 	"github.com/akshay0074700747/project-and-company-management-chat-service/internal/usecase/chat"
@@ -15,14 +16,15 @@ import (
 )
 
 type ChatHandlers struct {
-	Usecase     usecase.ChatUseaseInterface
-	Upgrader    websocket.Upgrader
-	CompanyConn companypb.CompanyServiceClient
-	ProjectConn projectpb.ProjectServiceClient
-	UserConn    userpb.UserServiceClient
+	Usecase       usecase.ChatUseaseInterface
+	Upgrader      websocket.Upgrader
+	CompanyConn   companypb.CompanyServiceClient
+	ProjectConn   projectpb.ProjectServiceClient
+	UserConn      userpb.UserServiceClient
+	InsertChannel chan<- entities.InsertIntoRoomMessage
 }
 
-func NewChatHandlers(usecase usecase.ChatUseaseInterface, compaddr, projectAddr, userAddr string) *ChatHandlers {
+func NewChatHandlers(usecase usecase.ChatUseaseInterface, compaddr, projectAddr, userAddr string, insertChan chan<- entities.InsertIntoRoomMessage) *ChatHandlers {
 	compRes, _ := helpers.DialGrpc(compaddr)
 	prijectRes, _ := helpers.DialGrpc(projectAddr)
 	userRes, _ := helpers.DialGrpc(userAddr)
@@ -35,16 +37,19 @@ func NewChatHandlers(usecase usecase.ChatUseaseInterface, compaddr, projectAddr,
 				return true
 			},
 		},
-		CompanyConn: companypb.NewCompanyServiceClient(compRes),
-		ProjectConn: projectpb.NewProjectServiceClient(prijectRes),
-		UserConn:    userpb.NewUserServiceClient(userRes),
+		CompanyConn:   companypb.NewCompanyServiceClient(compRes),
+		ProjectConn:   projectpb.NewProjectServiceClient(prijectRes),
+		UserConn:      userpb.NewUserServiceClient(userRes),
+		InsertChannel: insertChan,
 	}
 }
 
 func (chat *ChatHandlers) Start() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", chat.handler)
-	http.ListenAndServe(":50006", mux)
+	if err := http.ListenAndServe(":50006", mux); err != nil {
+		fmt.Println(err.Error())
+	}
 }
 
 func (chatt *ChatHandlers) handler(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +58,7 @@ func (chatt *ChatHandlers) handler(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("userID")
 	projectID := r.Header.Get("projectID")
 	companyID := r.Header.Get("companyID")
+	recieverID := r.Header.Get("recieverID")
 
 	if userID == "" {
 		http.Error(w, "the userID cannot be empty", http.StatusBadRequest)
@@ -60,7 +66,40 @@ func (chatt *ChatHandlers) handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var roomID string
-	if projectID != "" {
+	if recieverID != "" {
+		details, err := chatt.UserConn.GetUserDetails(context.TODO(), &userpb.GetUserDetailsReq{
+			UserID: userID,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			helpers.PrintErr(err, "error ahppened at GetUserDetails")
+			return
+		}
+
+		// recieverDetails,err := chatt.UserConn.GetUserDetails(context.TODO(), &userpb.GetUserDetailsReq{
+		// 	UserID: recieverID,
+		// })
+		// if err != nil {
+		// 	http.Error(w, err.Error(), http.StatusBadRequest)
+		// 	helpers.PrintErr(err, "error ahppened at GetUserDetails")
+		// 	return
+		// }
+
+		conn, err := chatt.Upgrader.Upgrade(w, r, r.Header)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			helpers.PrintErr(err, "error happened at upgrading the request")
+			return
+		}
+
+		pool, msgs := chatt.Usecase.SpinupPoolifnotalreadyExists(userID+" "+recieverID, chatt.InsertChannel, true)
+
+		client := chat.NewClient(conn, userID, details.Name, pool)
+
+		client.Serve(msgs)
+
+		return
+	} else if projectID != "" {
 		_, err := chatt.ProjectConn.IsMemberAccepted(context.TODO(), &projectpb.IsMemberAcceptedReq{
 			UserID:    userID,
 			ProjectID: projectID,
@@ -89,7 +128,7 @@ func (chatt *ChatHandlers) handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		http.Error(w, "the projectid or companyID should be specified", http.StatusBadRequest)
+		http.Error(w, "the projectid or companyID or recieverID should be specified", http.StatusBadRequest)
 		return
 	}
 
@@ -109,9 +148,9 @@ func (chatt *ChatHandlers) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pool := chatt.Usecase.SpinupPoolifnotalreadyExists(roomID)
+	pool, msgs := chatt.Usecase.SpinupPoolifnotalreadyExists(roomID, chatt.InsertChannel, false)
 
 	client := chat.NewClient(conn, userID, details.Name, pool)
 
-	client.Serve()
+	client.Serve(msgs)
 }
