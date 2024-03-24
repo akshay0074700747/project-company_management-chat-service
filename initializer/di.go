@@ -13,5 +13,6 @@ func Inject(cfg *config.Config) *handlers.ChatHandlers {
 	repo := repository.NewChatRepo(db)
 	usecase := usecase.NewChatUsecase(repo)
 	insertRoom := usecase.InsertIntoDB()
-	return handlers.NewChatHandlers(usecase, "company-service:50003", "project-service:50002","user-service:50001",insertRoom)
+	return handlers.NewChatHandlers(usecase, "company-service:50003", "project-service:50002", "user-service:50001", insertRoom)
 }
+      
