@@ -14,5 +14,5 @@ func main() {
 	}
 
 	handler := initializer.Inject(&cfg)
-	handler.Start()
+	handler.Start()     
 }
